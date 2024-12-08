@@ -23,11 +23,11 @@ let removeFirst pred list =
     removeFirstTailRec pred list []
 
 type RedisValue = 
-| Nil
-| String of string
-| Error of string
-| Ok
-| Array of RedisValue list
+    | Nil
+    | String of string
+    | Error of string
+    | Ok
+    | Array of RedisValue list
 
 let rec serializeValue value =
     match value with
