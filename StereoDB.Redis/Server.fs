@@ -39,7 +39,7 @@ type RedisValue =
     | String of string
     | Error of string
     | Ok
-    | Array of RedisValue list
+    | Array of RedisValue array
 
 let rec serializeValue value =
     match value with
@@ -47,7 +47,7 @@ let rec serializeValue value =
     | String v -> v.Length.ToString() + "\r\n" + v
     | Error v -> "-ERR " + v
     | Ok -> "+OK"
-    | Array v -> "*" + string v.Length + "\r\n" + System.String.Join("\r\n", v |> List.map serializeValue)
+    | Array v -> "*" + string v.Length + "\r\n" + System.String.Join("\r\n", v |> Array.map serializeValue)
 
 let writeToClient cl (msg: string) =
     let streamWriter = new StreamWriter(stream= cl)
@@ -88,9 +88,9 @@ let handleResponse clientId (line: string array) =
         | [|"CONFIG"; "GET"; configName|] -> 
             match configName with
             | "slave-read-only" -> String "yes"
-            | "databases" -> Array []
-            | _ -> Error (sprintf "Unknown configuration parameter '%s'" configName)
-        | [|"CLIENT"; command|] -> Error (sprintf "unknown command '%s'" command)
+            | "databases" -> Array [||]
+            | _ -> Error $"Unknown configuration parameter '%s{configName}'"
+        | [|"CLIENT"; command|] -> Error $"unknown command '%s{command}'"
         | [|"ECHO"; message |] -> String message
         | [|"SET"; _ |] -> Error "Wrong number of arguments for 'set' command"
         | [|"SET"; key; value |] -> 
@@ -99,7 +99,7 @@ let handleResponse clientId (line: string array) =
                 records.Set { Id=key; Value = value}
             )
             Ok
-        | _  -> Error (sprintf "Invalid command %A" line)
+        | _  -> Error $"Invalid command %A{line}"
     response
     
 let parseLine () =
@@ -150,6 +150,9 @@ let processor () =
                     | None -> None
     worker
 
+let trace (message : string) =
+    System.Console.WriteLine(message)
+
 let listenForMessages clientId endpoint stream = 
     let listenWorkflow = 
         task { 
@@ -165,24 +168,26 @@ let listenForMessages clientId endpoint stream =
                         if (buffer[i] = '\n' && builder.Length > 0 && builder[builder.Length - 1] = '\r') then
                             builder.Remove(builder.Length - 1, 1) |> ignore
                             let line = builder.ToString()
-                            printfn "%d >> %s" clientId line
+                            trace $"%d{clientId} >> %s{line}"
                             builder.Clear() |> ignore
                             match processor line with
                             | None -> ()
                             | Some command ->                                
                                 let response = handleResponse clientId command
                                 let line = response |> serializeValue
-                                printfn "%d << %s" clientId line
+                                trace $"%d{clientId} << %s{line}"
                                 do! writeToClient stream line
                         else
                             builder.Append(buffer[i]) |> ignore
             with _ -> let client = findClientConnection clientId
-                      let { Stream = stream; CancellationTokenSource = cts; WorkerTask = task }= client
+                      let { Stream = stream; CancellationTokenSource = cts; WorkerTask = task } = client
+
                       cts.Cancel()
                       task.Dispose()
                       stream.Dispose()
+
                       clientTaskList <- clientTaskList |> removeFirst (fun conn -> conn.Id = clientId)
-                      printfn "%s disconnected" endpoint
+                      printfn $"%s{endpoint} disconnected"
         }
     listenWorkflow
 
@@ -192,12 +197,14 @@ let listen port =
         task { 
             let listener = new TcpListener(IPAddress.Any, port)
             listener.Start()
-            printfn "Start listening on port %i" port
+            printfn $"Start listening on port %i{port}"
             while true do
                 let! client = listener.AcceptTcpClientAsync() |> Async.AwaitTask
                 let endpoint = (client.Client.RemoteEndPoint :?> IPEndPoint).Address.ToString()
+
                 id <- id + 1
-                printfn "Client connected: %A, id: %d" endpoint id
+                printfn $"Client connected: %A{endpoint}, id: %d{id}"
+
                 let cts = new CancellationTokenSource();
                 let clientListenTask = Task.Run (fun () -> listenForMessages id endpoint (client.GetStream()), cts.Token)
                 addClientTask { Id = id; CancellationTokenSource = cts; WorkerTask = clientListenTask; Stream = client.GetStream(); Name = ""; LibraryName = ""; LibraryVersion = "" }
