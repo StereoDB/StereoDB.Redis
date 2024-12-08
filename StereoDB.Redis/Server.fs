@@ -153,7 +153,7 @@ let processor () =
 let listenForMessages clientId endpoint stream = 
     let listenWorkflow = 
         task { 
-            use reader = new System.IO.StreamReader(stream)
+            use reader = new System.IO.StreamReader(stream = stream)
             try 
                 let mutable continueListening = true
                 let builder = StringBuilder()
