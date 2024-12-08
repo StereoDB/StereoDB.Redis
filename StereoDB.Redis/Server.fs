@@ -10,7 +10,15 @@ open StereoDB.FSharp
 open StereoDB.Redis.Schema
 open System.Text
 
-let mutable clientTaskList : (int * CancellationTokenSource * Task * NetworkStream) list = []
+type ClientConnect =
+    {
+        Id: int
+        CancellationTokenSource : CancellationTokenSource
+        WorkerTask: Task
+        Stream: NetworkStream
+    }
+
+let mutable clientTaskList : ClientConnect list = []
 
 let addClientTask cl = clientTaskList <- cl :: clientTaskList
 
@@ -172,12 +180,12 @@ let listenForMessages clientId endpoint cl =
                                 do! writeToClient cl line
                         else
                             builder.Append(buffer[i]) |> ignore
-            with _ -> let client = clientTaskList |> List.find (fun (id, _, _, _) -> id = clientId)
-                      let  _, cts, task, stream = client
+            with _ -> let client = clientTaskList |> List.find (fun conn -> conn.Id = clientId)
+                      let { Stream = stream; CancellationTokenSource = cts; WorkerTask = task }= client
                       cts.Cancel()
                       task.Dispose()
                       stream.Dispose()
-                      clientTaskList <- clientTaskList |> removeFirst (fun (id, _, _, _) -> id = clientId)
+                      clientTaskList <- clientTaskList |> removeFirst (fun conn -> conn.Id = clientId)
                       printfn "%s disconnected" endpoint
         }
     listenWorkflow
@@ -196,7 +204,6 @@ let listen port =
                 printfn "Client connected: %A, id: %d" endpoint id
                 let cts = new CancellationTokenSource();
                 let clientListenTask = Task.Run (fun () -> listenForMessages id endpoint (client.GetStream()), cts.Token)
-               
-                addClientTask (id, cts, clientListenTask, client.GetStream())
+                addClientTask { Id = id; CancellationTokenSource = cts; WorkerTask = clientListenTask; Stream = client.GetStream() }
         }
     listenWorkflow
