@@ -61,7 +61,7 @@ let db = StereoDb.create(Schema(), StereoDbSettings.Default)
 let handleResponse clientId (line: string array) =
     let response = 
         match line with
-        | [|"GET"|] ->  Error "wrong number of arguments for 'get' command"
+        | [|"GET"|] ->  Error "Wrong number of arguments for 'get' command"
         | [|"GET"; key |] ->
             let result = db.ReadTransaction (fun ctx ->
                 let records = ctx.UseTable(ctx.Schema.Records.Table)
@@ -70,13 +70,13 @@ let handleResponse clientId (line: string array) =
             match result with
             | ValueNone -> Nil
             | ValueSome value -> String value.Value
-        | [|"SET"|] -> Error "wrong number of arguments for 'set' command"
-        | [|"CLIENT"; "SETNAME"|] -> Error "wrong number of arguments for 'SETNAME' command"
+        | [|"SET"|] -> Error "Wrong number of arguments for 'set' command"
+        | [|"CLIENT"; "SETNAME"|] -> Error "Wrong number of arguments for 'SETNAME' command"
         | [|"CLIENT"; "SETNAME"; name|] -> 
             let connection = findClientConnection clientId
             connection.Name <- name
             Ok
-        | [|"CLIENT"; "SETINFO"|] -> Error "wrong number of arguments for 'SETINFO' command"
+        | [|"CLIENT"; "SETINFO"|] -> Error "Wrong number of arguments for 'SETINFO' command"
         | [|"CLIENT"; "SETINFO"; "lib-ver"; libVer|] -> 
             let connection = findClientConnection clientId
             connection.LibraryVersion <- libVer
@@ -89,10 +89,10 @@ let handleResponse clientId (line: string array) =
             match configName with
             | "slave-read-only" -> String "yes"
             | "databases" -> Array []
-            | _ -> Error (sprintf "unknown configuration parameter '%s'" configName)
+            | _ -> Error (sprintf "Unknown configuration parameter '%s'" configName)
         | [|"CLIENT"; command|] -> Error (sprintf "unknown command '%s'" command)
         | [|"ECHO"; message |] -> String message
-        | [|"SET"; _ |] -> Error "wrong number of arguments for 'set' command"
+        | [|"SET"; _ |] -> Error "Wrong number of arguments for 'set' command"
         | [|"SET"; key; value |] -> 
             db.WriteTransaction (fun ctx ->
                 let records = ctx.UseTable(ctx.Schema.Records.Table)
@@ -102,19 +102,6 @@ let handleResponse clientId (line: string array) =
         | _  -> Error (sprintf "Invalid command %A" line)
     response
     
-let decodeArray (stack: string array) =
-    let s = 
-        seq {
-            let mutable size = None
-            for i = 0 to stack.Length do
-                match size with
-                | None -> size <- Some (int stack[i])
-                | Some size -> 
-                    assert (stack[i].Length = size)
-                    yield stack[i]
-        }
-    s |> Seq.toArray
-
 let parseLine () =
     let mutable expected = 0
     let x = 
@@ -163,10 +150,10 @@ let processor () =
                     | None -> None
     worker
 
-let listenForMessages clientId endpoint cl = 
+let listenForMessages clientId endpoint stream = 
     let listenWorkflow = 
         task { 
-            use reader = new System.IO.StreamReader(stream = cl)
+            use reader = new System.IO.StreamReader(stream)
             try 
                 let mutable continueListening = true
                 let builder = StringBuilder()
@@ -186,7 +173,7 @@ let listenForMessages clientId endpoint cl =
                                 let response = handleResponse clientId command
                                 let line = response |> serializeValue
                                 printfn "%d << %s" clientId line
-                                do! writeToClient cl line
+                                do! writeToClient stream line
                         else
                             builder.Append(buffer[i]) |> ignore
             with _ -> let client = findClientConnection clientId
