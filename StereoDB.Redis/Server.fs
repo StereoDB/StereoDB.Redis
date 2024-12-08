@@ -10,14 +10,14 @@ open StereoDB.FSharp
 open StereoDB.Redis.Schema
 open System.Text
 
-type ClientConnect = {
+type ClientConnection = {
         Id: int
         CancellationTokenSource : CancellationTokenSource
         WorkerTask: Task
         Stream: NetworkStream
     }
 
-let mutable clientTaskList : ClientConnect list = []
+let mutable clientTaskList : ClientConnection list = []
 
 let addClientTask cl = clientTaskList <- cl :: clientTaskList
 
