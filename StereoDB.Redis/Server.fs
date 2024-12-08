@@ -15,11 +15,16 @@ type ClientConnection = {
         CancellationTokenSource : CancellationTokenSource
         WorkerTask: Task
         Stream: NetworkStream
+        mutable Name: string
+        mutable LibraryName: string
+        mutable LibraryVersion: string
     }
 
 let mutable clientTaskList : ClientConnection list = []
 
 let addClientTask cl = clientTaskList <- cl :: clientTaskList
+
+let findClientConnection clientId = clientTaskList |> List.find (fun conn -> conn.Id = clientId)
 
 let removeFirst pred list = 
     let rec removeFirstTailRec p l acc =
@@ -53,7 +58,7 @@ let writeToClient cl (msg: string) =
 
 let db = StereoDb.create(Schema(), StereoDbSettings.Default)
 
-let handleResponse (line: string array) =
+let handleResponse clientId (line: string array) =
     let response = 
         match line with
         | [|"GET"|] ->  Error "wrong number of arguments for 'get' command"
@@ -67,10 +72,19 @@ let handleResponse (line: string array) =
             | ValueSome value -> String value.Value
         | [|"SET"|] -> Error "wrong number of arguments for 'set' command"
         | [|"CLIENT"; "SETNAME"|] -> Error "wrong number of arguments for 'SETNAME' command"
-        | [|"CLIENT"; "SETNAME"; name|] -> Ok
+        | [|"CLIENT"; "SETNAME"; name|] -> 
+            let connection = findClientConnection clientId
+            connection.Name <- name
+            Ok
         | [|"CLIENT"; "SETINFO"|] -> Error "wrong number of arguments for 'SETINFO' command"
-        | [|"CLIENT"; "SETINFO"; "lib-ver"; libVer|] -> Ok
-        | [|"CLIENT"; "SETINFO"; "lib-name"; libName|] -> Ok
+        | [|"CLIENT"; "SETINFO"; "lib-ver"; libVer|] -> 
+            let connection = findClientConnection clientId
+            connection.LibraryVersion <- libVer
+            Ok
+        | [|"CLIENT"; "SETINFO"; "lib-name"; libName|] -> 
+            let connection = findClientConnection clientId
+            connection.LibraryName <- libName
+            Ok
         | [|"CONFIG"; "GET"; configName|] -> 
             match configName with
             | "slave-read-only" -> String "yes"
@@ -88,10 +102,6 @@ let handleResponse (line: string array) =
         | _  -> Error (sprintf "Invalid command %A" line)
     response
     
-let handleInlineCommand (line: string) =
-    let line = line.Split(' ', System.StringSplitOptions.RemoveEmptyEntries)
-    handleResponse line
-
 let decodeArray (stack: string array) =
     let s = 
         seq {
@@ -173,13 +183,13 @@ let listenForMessages clientId endpoint cl =
                             match processor line with
                             | None -> ()
                             | Some command ->                                
-                                let response = handleResponse command
+                                let response = handleResponse clientId command
                                 let line = response |> serializeValue
                                 printfn "%d << %s" clientId line
                                 do! writeToClient cl line
                         else
                             builder.Append(buffer[i]) |> ignore
-            with _ -> let client = clientTaskList |> List.find (fun conn -> conn.Id = clientId)
+            with _ -> let client = findClientConnection clientId
                       let { Stream = stream; CancellationTokenSource = cts; WorkerTask = task }= client
                       cts.Cancel()
                       task.Dispose()
@@ -203,6 +213,6 @@ let listen port =
                 printfn "Client connected: %A, id: %d" endpoint id
                 let cts = new CancellationTokenSource();
                 let clientListenTask = Task.Run (fun () -> listenForMessages id endpoint (client.GetStream()), cts.Token)
-                addClientTask { Id = id; CancellationTokenSource = cts; WorkerTask = clientListenTask; Stream = client.GetStream() }
+                addClientTask { Id = id; CancellationTokenSource = cts; WorkerTask = clientListenTask; Stream = client.GetStream(); Name = ""; LibraryName = ""; LibraryVersion = "" }
         }
     listenWorkflow
