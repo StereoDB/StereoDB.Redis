@@ -10,8 +10,7 @@ open StereoDB.FSharp
 open StereoDB.Redis.Schema
 open System.Text
 
-type ClientConnect =
-    {
+type ClientConnect = {
         Id: int
         CancellationTokenSource : CancellationTokenSource
         WorkerTask: Task
