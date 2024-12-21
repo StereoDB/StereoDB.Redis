@@ -45,7 +45,7 @@ type RedisValue =
 let rec serializeValue value =
     match value with
     | Nil -> "$-1"
-    | String v -> "$" + v.Length.ToString() + "\r\n" + v
+    | String v -> System.String.Format("${0}\r\n{1}", v.Length, v)
     | Number v -> ":" + string v
     | Error v -> "-ERR " + v
     | Ok -> "+OK"
