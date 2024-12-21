@@ -37,6 +37,7 @@ let removeFirst pred list =
 type RedisValue = 
     | Nil
     | String of string
+    | Number of int64
     | Error of string
     | Ok
     | Array of RedisValue array
@@ -44,7 +45,8 @@ type RedisValue =
 let rec serializeValue value =
     match value with
     | Nil -> "$-1"
-    | String v -> v.Length.ToString() + "\r\n" + v
+    | String v -> System.String.Format("${0}\r\n{1}", v.Length, v)
+    | Number v -> ":" + string v
     | Error v -> "-ERR " + v
     | Ok -> "+OK"
     | Array v -> "*" + string v.Length + "\r\n" + System.String.Join("\r\n", v |> Array.map serializeValue)
@@ -70,12 +72,29 @@ let handleResponse clientId (line: string array) =
             match result with
             | ValueNone -> Nil
             | ValueSome value -> String value.Value
-        | [|"SET"|] -> Error "Wrong number of arguments for 'set' command"
         | [|"CLIENT"; "SETNAME"|] -> Error "Wrong number of arguments for 'SETNAME' command"
         | [|"CLIENT"; "SETNAME"; name|] -> 
             let connection = findClientConnection clientId
             connection.Name <- name
             Ok
+        | [|"INCR"|] -> Error "Wrong number of arguments for 'incr' command"
+        | [|"INCR"; key |] ->
+            let mutable result = 
+                db.WriteTransaction (fun ctx ->
+                    let records = ctx.UseTable(ctx.Schema.Records.Table)
+                    let value = records.Get key
+                    let result =
+                        match value with
+                        | ValueNone -> 1L
+                        | ValueSome value -> (int64 value.Value) + 1L
+                    records.Set { Id=key; Value = string result }
+                    ValueSome result
+                )
+            match result with
+            | ValueNone -> Error (System.String.Format("Increment of key {0} failed", key))
+            | ValueSome value -> Number value
+        | [|"PING"|] -> String "PONG"
+        | [|"PING"; message|] -> String message
         | [|"CLIENT"; "SETINFO"|] -> Error "Wrong number of arguments for 'SETINFO' command"
         | [|"CLIENT"; "SETINFO"; "lib-ver"; libVer|] -> 
             let connection = findClientConnection clientId
@@ -88,10 +107,15 @@ let handleResponse clientId (line: string array) =
         | [|"CONFIG"; "GET"; configName|] -> 
             match configName with
             | "slave-read-only" -> String "yes"
+            // Snapshotting parameter https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/#snapshotting
+            | "save" -> Array [| String "SAVE";String "3600 1 300 100 60 10000" |]
+            // Append only parameter https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/#append-only-file
+            | "appendonly" -> Array [| String "appendonly";String "no" |]
             | "databases" -> Array [||]
             | _ -> Error $"Unknown configuration parameter '%s{configName}'"
         | [|"CLIENT"; command|] -> Error $"unknown command '%s{command}'"
         | [|"ECHO"; message |] -> String message
+        | [|"SET"|] -> Error "Wrong number of arguments for 'set' command"
         | [|"SET"; _ |] -> Error "Wrong number of arguments for 'set' command"
         | [|"SET"; key; value |] -> 
             db.WriteTransaction (fun ctx ->
@@ -151,7 +175,10 @@ let processor () =
     worker
 
 let trace (message : string) =
+#if DEBUG
     System.Console.WriteLine(message)
+#endif
+    ()
 
 let listenForMessages clientId endpoint stream = 
     let listenWorkflow = 
@@ -164,6 +191,7 @@ let listenForMessages clientId endpoint stream =
                 let processor = processor()
                 while continueListening do
                     let! readCount = reader.ReadAsync(buffer, 0, 1024)
+                    if readCount = 0 then continueListening <- false
                     for i = 0 to readCount - 1 do
                         if (buffer[i] = '\n' && builder.Length > 0 && builder[builder.Length - 1] = '\r') then
                             builder.Remove(builder.Length - 1, 1) |> ignore
